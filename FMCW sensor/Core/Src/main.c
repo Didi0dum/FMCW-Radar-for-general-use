@@ -22,6 +22,9 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+#define ARM_MATH_CM4 //Core we're operating on
+#include "arm_math.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -37,6 +40,10 @@
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 
+#define DAC_BUFFER_LEN 300 //in micro secs
+#define DAC_SLOPE_START_VALUE 450
+#define DAC_SLOPE_VALUE 1
+
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -48,6 +55,18 @@ UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
 
+#define FFT_BUFFER_SIZE 128
+
+arm_cfft_radix4_instance_q15 fftHandler;
+
+float fftBufIn[FFT_BUFFER_SIZE];
+float fftBufOut[FFT_BUFFER_SIZE];
+
+uint8_t fftFlag = 0; //Flag for when the transformation is complete
+
+uint16_t dac_data[DAC_BUFFER_LEN];
+
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -58,10 +77,18 @@ static void MX_DAC1_Init(void);
 static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
+void DAC_Slope_Init(void);  //Creates an array of steps to use later for the sawtooth voltage
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+void DAC_Slope_Init(void){
+	for(int16_t i; i < DAC_BUFFER_LEN; i++){
+		dac_data[i] = DAC_SLOPE_START_VALUE + i * DAC_SLOPE_VALUE;
+	}
+}
 
 /* USER CODE END 0 */
 
@@ -81,6 +108,8 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
+
+  DAC_Slope_Init();
 
   /* USER CODE END Init */
 
@@ -105,7 +134,6 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
