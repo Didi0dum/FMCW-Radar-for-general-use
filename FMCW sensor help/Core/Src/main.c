@@ -40,11 +40,11 @@
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 
-#define DAC_BUFFER_LEN 300 //in micro secs
-#define DAC_SLOPE_START_VALUE 450
-#define DAC_SLOPE_VALUE 1
+#define DAC_BUFFER_LEN 		 				 128  // DAC_BUFFLEN in micro seconds                             200
+#define DAC_SLOPE_VALUE 	 				   30  //                                                         //1
+#define DAC_SLOPE_START_VALUE				450	  //(DAC_SLOPE_START_VALUE+DAC_BUFFLEN*DAC_SLOPE_VALUE)<4096  //850
+#define ADC_SAMPLES							128
 
-#define ADC_SAMPLES ((uint32_t)(128))
 
 /* USER CODE END PM */
 
@@ -63,19 +63,11 @@ UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
 
-#define FFT_BUFFER_SIZE 128
-
-arm_cfft_radix4_instance_q15 fftHandler;
-
-float fftBufIn[FFT_BUFFER_SIZE];
-float fftBufOut[FFT_BUFFER_SIZE];
-
 uint8_t fftFlag = 0; //Flag for when the transformation is complete
 uint8_t do_fft = 0; //Flag for when ADC has new data for us to read
 
-uint16_t dac_data[DAC_BUFFER_LEN]; //Values for different voltages in the slope of the sawtooth voltage
-
-int16_t adcBuffer[ADC_SAMPLES + 16]; //Array of ADC data
+volatile uint32_t dac_data[DAC_BUFFER_LEN]; //Values for different voltages in the slope of the sawtooth voltage
+volatile uint16_t adcBuffer[ADC_SAMPLES + 16]; //Array of ADC data
 
 
 /* USER CODE END PV */
@@ -99,55 +91,6 @@ void DAC_Slope_Init(void);  //Creates an array of steps to use later for the saw
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-void DAC_Slope_Init(void){
-	for(int16_t i; i < DAC_BUFFER_LEN; i++){
-		dac_data[i] = DAC_SLOPE_START_VALUE + i * DAC_SLOPE_VALUE;
-	}
-}
-
-void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim1){
-
-
-		 if(htim1->Channel == HAL_TIM_ACTIVE_CHANNEL_1) // Start generating sawtooth voltage
-		 {
-
-			HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin,RESET); //breakpoint
-
-			HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t *)dac_data, DAC_BUFFER_LEN, DAC_ALIGN_12B_R);
-			HAL_TIM_Base_Start(&htim6); //start DAC
-
-		 }
-
-		 if(htim1->Channel == HAL_TIM_ACTIVE_CHANNEL_2) // Start reading ADC a bit later
-		 {
-            HAL_ADC_Start_DMA(&hadc2, (uint32_t *)&adcBuffer, (ADC_SAMPLES+2));
-	        HAL_TIM_Base_Start(&htim7); //start ADC
-	 	 	HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin,RESET);
-
-		}
-}
-
-/* Set the DAC DMA transfer complete callback */
-void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac1){ //Stop generating sawtooth voltage
-
-	HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin,RESET);
-
-	 HAL_TIM_Base_Stop(&htim6);
-	 __HAL_TIM_RESET_HANDLE_STATE(&htim6);
-
-}
-
-
-/* Set the ADC DMA transfer complete callback */
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc2){ // Stop reading ADC
-
-	HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin,RESET);
-
-	HAL_TIM_Base_Stop(&htim7);
-	__HAL_TIM_RESET_HANDLE_STATE(&htim7);
-	do_fft = 1; //new data to do fft on
-}
-
 /* USER CODE END 0 */
 
 /**
@@ -166,8 +109,6 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
-  DAC_Slope_Init();
 
   /* USER CODE END Init */
 
@@ -188,14 +129,23 @@ int main(void)
   MX_TIM6_Init();
   MX_TIM7_Init();
   /* USER CODE BEGIN 2 */
+  for(int16_t i; i < DAC_BUFFER_LEN; i++){
+    			dac_data[i] = DAC_SLOPE_START_VALUE + i * DAC_SLOPE_VALUE;
+   }
   HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_1); //Impulse for DAC sawtooth voltage
   HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_2); //Impulse for ADC read
+  //HAL_TIM_Base_Start(&htim6); //start DAC
+  HAL_GPIO_WritePin(BGT_VCC_EN_GPIO_Port, BGT_VCC_EN_Pin, RESET);
+  HAL_GPIO_WritePin(TH_EN_GPIO_Port, TH_EN_Pin, SET);
+  HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t *)dac_data, DAC_BUFFER_LEN, DAC_ALIGN_12B_R);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+
+	  HAL_Delay(10);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -470,7 +420,7 @@ static void MX_TIM6_Init(void)
   htim6.Instance = TIM6;
   htim6.Init.Prescaler = 84;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 1;
+  htim6.Init.Period = 2;
   htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
   {
@@ -506,9 +456,9 @@ static void MX_TIM7_Init(void)
 
   /* USER CODE END TIM7_Init 1 */
   htim7.Instance = TIM7;
-  htim7.Init.Prescaler = 1;
+  htim7.Init.Prescaler = 84;
   htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim7.Init.Period = 21;
+  htim7.Init.Period = 2;
   htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim7) != HAL_OK)
   {
@@ -614,10 +564,13 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, BGT_VCC_EN_Pin|FUNCTION2_OUT_Pin|FUNCTION1_OUT_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(BGT_VCC_EN_GPIO_Port, BGT_VCC_EN_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(TH_EN_GPIO_Port, TH_EN_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, FUNCTION2_OUT_Pin|FUNCTION1_OUT_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : GREEN_LED_Pin */
   GPIO_InitStruct.Pin = GREEN_LED_Pin;
@@ -651,6 +604,42 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+
+	void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim1){
+
+
+		 if(htim1->Channel == HAL_TIM_ACTIVE_CHANNEL_1) // Start generating sawtooth voltage
+		 {
+
+			HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, SET); //breakpoint test
+			HAL_TIM_Base_Start(&htim6); //start DAC timer
+
+		 }
+
+		 if(htim1->Channel == HAL_TIM_ACTIVE_CHANNEL_2) // Start reading ADC a bit later
+		 {
+            HAL_ADC_Start_DMA(&hadc2, (uint32_t *)&adcBuffer, (ADC_SAMPLES+2)); // Reading from ADC and writing in buffer
+	        HAL_TIM_Base_Start(&htim7); //start ADC timer
+	 	 	//HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin,RESET);
+
+		 }
+	}
+
+	/* Set the DAC DMA transfer complete callback */
+	void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac1){  //Stop generating sawtooth voltage
+
+		 	HAL_TIM_Base_Stop(&htim6);
+
+	}
+
+	/* Set the ADC DMA transfer complete callback */
+	void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc2){  // Stop reading ADC
+
+
+		 HAL_TIM_Base_Stop(&htim7);
+
+	}
 
 /* USER CODE END 4 */
 
