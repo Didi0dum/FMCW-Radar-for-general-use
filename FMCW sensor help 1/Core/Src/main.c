@@ -22,7 +22,6 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
-#define ARM_MATH_CM4 //Core we're operating on
 #include "arm_math.h"
 
 /* USER CODE END Includes */
@@ -40,10 +39,11 @@
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 
-#define DAC_BUFFER_LEN 		 				128  	// DAC_BUFFLEN in micro seconds
-#define DAC_SLOPE_VALUE 	 				30  	//
-#define DAC_SLOPE_START_VALUE				450	    //initial value (DAC_SLOPE_START_VALUE+DAC_BUFFLEN*DAC_SLOPE_VALUE)<4096  //850
-#define ADC_SAMPLES							128
+#define DAC_BUFFER_LEN 		 				1024	// DAC_BUFFLEN steps for in micro seconds
+#define DAC_SLOPE_VALUE 	 				2
+#define DAC_SLOPE_START_VALUE				50 		//initial value (DAC_SLOPE_START_VALUE+DAC_BUFFLEN*DAC_SLOPE_VALUE)<4096  //850
+#define ADC_SAMPLES							256		// 128 двойки числа - комплексни (такта)
+#define FFT_BUFFER_SIZE				 ((uint32_t)(ADC_SAMPLES/4))
 
 
 /* USER CODE END PM */
@@ -62,6 +62,11 @@ TIM_HandleTypeDef htim7;
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
+
+arm_cfft_radix4_instance_f32 fftHandler;
+
+float fftBufIn[ADC_SAMPLES];
+float fftBufOut[ADC_SAMPLES];
 
 uint8_t fftFlag = 0; //Flag for when the transformation is complete
 uint8_t do_fft = 0; //Flag for when ADC has new data for us to read
@@ -86,7 +91,8 @@ static void MX_TIM6_Init(void);
 static void MX_TIM7_Init(void);
 /* USER CODE BEGIN PFP */
 
-void DAC_Slope_Init(void);  //Creates an array of steps to use later for the sawtooth voltage
+void DAC_Slope_Init(void);  //Creates an array of steps to use later for the sawtooth voltage (this did not work, so no good looking code here)
+void do_fft_func(void);
 
 /* USER CODE END PFP */
 
@@ -139,11 +145,16 @@ int main(void)
   HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_1); //Impulse for DAC sawtooth voltage
   HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_2); //Impulse for ADC read
 
+
   /* Ports for high frequency chip */
   HAL_GPIO_WritePin(BGT_VCC_EN_GPIO_Port, BGT_VCC_EN_Pin, RESET);
   HAL_GPIO_WritePin(TH_EN_GPIO_Port, TH_EN_Pin, SET);
 
   HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t *)dac_data, DAC_BUFFER_LEN, DAC_ALIGN_12B_R);
+
+  /* FFT init */
+  //arm_rfft_fast_init_f32(&fftHandler, FFT_BUFFER_SIZE);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -151,7 +162,10 @@ int main(void)
   while (1)
   {
 
-	  HAL_Delay(10);
+	  if(do_fft){
+		  do_fft_func();
+	  }
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -378,7 +392,7 @@ static void MX_TIM1_Init(void)
   {
     Error_Handler();
   }
-  sConfigOC.Pulse = 100;
+  sConfigOC.Pulse = 40;
   if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
   {
     Error_Handler();
@@ -424,7 +438,7 @@ static void MX_TIM6_Init(void)
 
   /* USER CODE END TIM6_Init 1 */
   htim6.Instance = TIM6;
-  htim6.Init.Prescaler = 84;
+  htim6.Init.Prescaler = 21;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim6.Init.Period = 2;
   htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -644,7 +658,22 @@ static void MX_GPIO_Init(void)
 	void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc2){  // Stop reading ADC
 
 		 HAL_TIM_Base_Stop(&htim7);
+		 do_fft = 1;
 
+	}
+
+	void do_fft_func(void){
+
+		for(int i = 0; i < ADC_SAMPLES; i++){
+			fftBufIn[i] = adcBuffer[i];
+		}
+
+		arm_cfft_radix4_init_f32(&fftHandler, FFT_BUFFER_SIZE, 0, 1); //init fft here cuz idk it doesn't seem to work up there
+
+		arm_cfft_radix4_f32(&fftHandler, fftBufIn); //complete fft, but in complex numbers
+		arm_cmplx_mag_f32(fftBufIn, fftBufOut, FFT_BUFFER_SIZE); // p theorem to get amplitude
+
+		do_fft = 0;
 	}
 
 /* USER CODE END 4 */
